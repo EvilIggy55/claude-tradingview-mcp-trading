@@ -150,39 +150,20 @@ function calcEMA(closes, period) {
   return ema;
 }
 
-function calcRSI(closes, period = 14) {
-  if (closes.length < period + 1) return null;
-  let gains = 0,
-    losses = 0;
-  for (let i = closes.length - period; i < closes.length; i++) {
-    const diff = closes[i] - closes[i - 1];
-    if (diff > 0) gains += diff;
-    else losses -= diff;
+function calcATR(candles, period = 14) {
+  if (candles.length < period + 1) return null;
+  const trs = [];
+  for (let i = candles.length - period; i < candles.length; i++) {
+    const { high, low } = candles[i];
+    const prevClose = candles[i - 1].close;
+    trs.push(Math.max(high - low, Math.abs(high - prevClose), Math.abs(low - prevClose)));
   }
-  const avgGain = gains / period;
-  const avgLoss = losses / period;
-  if (avgLoss === 0) return 100;
-  const rs = avgGain / avgLoss;
-  return 100 - 100 / (1 + rs);
-}
-
-// VWAP — session-based, resets at midnight UTC
-function calcVWAP(candles) {
-  const midnightUTC = new Date();
-  midnightUTC.setUTCHours(0, 0, 0, 0);
-  const sessionCandles = candles.filter((c) => c.time >= midnightUTC.getTime());
-  if (sessionCandles.length === 0) return null;
-  const cumTPV = sessionCandles.reduce(
-    (sum, c) => sum + ((c.high + c.low + c.close) / 3) * c.volume,
-    0,
-  );
-  const cumVol = sessionCandles.reduce((sum, c) => sum + c.volume, 0);
-  return cumVol === 0 ? null : cumTPV / cumVol;
+  return trs.reduce((a, b) => a + b, 0) / period;
 }
 
 // ─── Safety Check ───────────────────────────────────────────────────────────
 
-function runSafetyCheck(price, ema8, vwap, rsi3, rules) {
+function runSafetyCheck(price, ema20, ema50, atr, volume, avgVolume, high20, low20, rules) {
   const results = [];
 
   const check = (label, required, actual, pass) => {
@@ -194,81 +175,79 @@ function runSafetyCheck(price, ema8, vwap, rsi3, rules) {
 
   console.log("\n── Safety Check ─────────────────────────────────────────\n");
 
-  // Determine bias first
-  const bullishBias = price > vwap && price > ema8;
-  const bearishBias = price < vwap && price < ema8;
+  const bullishBias = price > ema20 && ema20 > ema50;
+  const bearishBias = price < ema20 && ema20 < ema50;
 
   if (bullishBias) {
     console.log("  Bias: BULLISH — checking long entry conditions\n");
 
-    // 1. Price above VWAP
     check(
-      "Price above VWAP (buyers in control)",
-      `> ${vwap.toFixed(2)}`,
+      "Price above EMA(20) and EMA(20) above EMA(50) (trend alignment)",
+      `price > ${ema20.toFixed(2)}, EMA20 > ${ema50.toFixed(2)}`,
+      `price ${price.toFixed(2)}, EMA20 ${ema20.toFixed(2)}`,
+      price > ema20 && ema20 > ema50,
+    );
+
+    check(
+      "Price above 20-period high (breakout triggered)",
+      `> ${high20.toFixed(2)}`,
       price.toFixed(2),
-      price > vwap,
+      price > high20,
     );
 
-    // 2. Price above EMA(8)
+    const volRatio = volume / avgVolume;
     check(
-      "Price above EMA(8) (uptrend confirmed)",
-      `> ${ema8.toFixed(2)}`,
-      price.toFixed(2),
-      price > ema8,
+      "Volume > 1.5x 20-period average (institutional participation)",
+      "> 1.5x avg",
+      `${volRatio.toFixed(2)}x`,
+      volRatio > 1.5,
     );
 
-    // 3. RSI(3) pullback
+    // Most important rule: not overextended
+    const distAboveBreakout = price - high20;
     check(
-      "RSI(3) below 30 (snap-back setup in uptrend)",
-      "< 30",
-      rsi3.toFixed(2),
-      rsi3 < 30,
-    );
-
-    // 4. Not overextended from VWAP
-    const distFromVWAP = Math.abs((price - vwap) / vwap) * 100;
-    check(
-      "Price within 1.5% of VWAP (not overextended)",
-      "< 1.5%",
-      `${distFromVWAP.toFixed(2)}%`,
-      distFromVWAP < 1.5,
+      "Price within 1x ATR of breakout level (not overextended — most important rule)",
+      `< ${atr.toFixed(2)} (1x ATR)`,
+      `${distAboveBreakout.toFixed(2)} above breakout`,
+      distAboveBreakout < atr,
     );
   } else if (bearishBias) {
     console.log("  Bias: BEARISH — checking short entry conditions\n");
 
     check(
-      "Price below VWAP (sellers in control)",
-      `< ${vwap.toFixed(2)}`,
+      "Price below EMA(20) and EMA(20) below EMA(50) (trend alignment)",
+      `price < ${ema20.toFixed(2)}, EMA20 < ${ema50.toFixed(2)}`,
+      `price ${price.toFixed(2)}, EMA20 ${ema20.toFixed(2)}`,
+      price < ema20 && ema20 < ema50,
+    );
+
+    check(
+      "Price below 20-period low (breakdown triggered)",
+      `< ${low20.toFixed(2)}`,
       price.toFixed(2),
-      price < vwap,
+      price < low20,
     );
 
+    const volRatio = volume / avgVolume;
     check(
-      "Price below EMA(8) (downtrend confirmed)",
-      `< ${ema8.toFixed(2)}`,
-      price.toFixed(2),
-      price < ema8,
+      "Volume > 1.5x 20-period average (institutional selling)",
+      "> 1.5x avg",
+      `${volRatio.toFixed(2)}x`,
+      volRatio > 1.5,
     );
 
+    const distBelowBreakout = low20 - price;
     check(
-      "RSI(3) above 70 (reversal setup in downtrend)",
-      "> 70",
-      rsi3.toFixed(2),
-      rsi3 > 70,
-    );
-
-    const distFromVWAP = Math.abs((price - vwap) / vwap) * 100;
-    check(
-      "Price within 1.5% of VWAP (not overextended)",
-      "< 1.5%",
-      `${distFromVWAP.toFixed(2)}%`,
-      distFromVWAP < 1.5,
+      "Price within 1x ATR of breakdown level (not overextended — most important rule)",
+      `< ${atr.toFixed(2)} (1x ATR)`,
+      `${distBelowBreakout.toFixed(2)} below breakdown`,
+      distBelowBreakout < atr,
     );
   } else {
-    console.log("  Bias: NEUTRAL — no clear direction. No trade.\n");
+    console.log("  Bias: NEUTRAL — EMA(20)/EMA(50) not aligned. No trade.\n");
     results.push({
       label: "Market bias",
-      required: "Bullish or bearish",
+      required: "EMA(20) > EMA(50) or EMA(20) < EMA(50)",
       actual: "Neutral",
       pass: false,
     });
@@ -517,7 +496,7 @@ async function run() {
     return;
   }
 
-  // Fetch candle data — need enough for EMA(8) + full session for VWAP
+  // Fetch candle data — need enough for EMA(50) + ATR(14)
   console.log("\n── Fetching market data from Binance ───────────────────\n");
   const candles = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 500);
   const closes = candles.map((c) => c.close);
@@ -525,21 +504,28 @@ async function run() {
   console.log(`  Current price: $${price.toFixed(2)}`);
 
   // Calculate indicators
-  const ema8 = calcEMA(closes, 8);
-  const vwap = calcVWAP(candles);
-  const rsi3 = calcRSI(closes, 3);
+  const ema20 = calcEMA(closes, 20);
+  const ema50 = calcEMA(closes, 50);
+  const atr = calcATR(candles, 14);
+  const volume = candles[candles.length - 1].volume;
+  const prior20 = candles.slice(-21, -1); // 20 candles before current
+  const avgVolume = prior20.reduce((sum, c) => sum + c.volume, 0) / prior20.length;
+  const high20 = Math.max(...prior20.map((c) => c.high));
+  const low20 = Math.min(...prior20.map((c) => c.low));
 
-  console.log(`  EMA(8):  $${ema8.toFixed(2)}`);
-  console.log(`  VWAP:    $${vwap ? vwap.toFixed(2) : "N/A"}`);
-  console.log(`  RSI(3):  ${rsi3 ? rsi3.toFixed(2) : "N/A"}`);
+  console.log(`  EMA(20): $${ema20.toFixed(2)}`);
+  console.log(`  EMA(50): $${ema50.toFixed(2)}`);
+  console.log(`  ATR(14): $${atr ? atr.toFixed(2) : "N/A"}`);
+  console.log(`  Volume:  ${volume.toFixed(2)} (avg ${avgVolume.toFixed(2)})`);
+  console.log(`  20-period high: $${high20.toFixed(2)} | low: $${low20.toFixed(2)}`);
 
-  if (!vwap || !rsi3) {
-    console.log("\n⚠️  Not enough data to calculate indicators. Exiting.");
+  if (!atr) {
+    console.log("\n⚠️  Not enough data to calculate ATR. Exiting.");
     return;
   }
 
   // Run safety check
-  const { results, allPass } = runSafetyCheck(price, ema8, vwap, rsi3, rules);
+  const { results, allPass } = runSafetyCheck(price, ema20, ema50, atr, volume, avgVolume, high20, low20, rules);
 
   // Calculate position size
   const tradeSize = Math.min(
@@ -555,7 +541,7 @@ async function run() {
     symbol: CONFIG.symbol,
     timeframe: CONFIG.timeframe,
     price,
-    indicators: { ema8, vwap, rsi3 },
+    indicators: { ema20, ema50, atr, volume, avgVolume, high20, low20 },
     conditions: results,
     allPass,
     tradeSize,

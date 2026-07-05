@@ -1,50 +1,61 @@
 {
   "watchlist": ["BTCUSDT"],
-  "default_timeframe": "1m",
+  "default_timeframe": "4H",
 
   "strategy": {
-    "name": "VWAP + RSI(3) + EMA(8) Scalping Strategy",
-    "sources": ["Lewis Jackson"],
-    "description": "Three indicators, each doing a different job. EMA(8) for trend direction, VWAP for session bias, RSI(3) for entry timing. All three must align before a trade fires."
+    "name": "Qullamaggie Breakout",
+    "sources": ["Kristjan Kullamägi (@Qullamaggie)"],
+    "description": "Momentum move followed by tight consolidation above EMA(20)/EMA(50), then breakout above the 20-period high with volume expansion. The ATR filter is the most important rule — skip every overextended entry."
   },
 
   "indicators": {
-    "ema_8": "Trend direction. Price above EMA(8) = bullish momentum. Below = bearish.",
-    "vwap": "Session bias. Price above VWAP = buyers in control. Below = sellers. Resets at midnight UTC.",
-    "rsi_3": "Entry timing. RSI on 3 candles only — extremely sensitive. Below 30 in an uptrend = snap-back setup. Above 70 in a downtrend = reversal likely."
+    "ema_20": "Short-term trend. Price must be above this during consolidation. Acts as dynamic support.",
+    "ema_50": "Medium-term trend. EMA(20) must be above EMA(50) for bullish alignment.",
+    "atr_14": "Volatility measure. Used to check if price is overextended above the breakout level. Most important filter.",
+    "volume": "Breakout confirmation. Volume must expand significantly on the breakout bar (>1.5x 20-period average).",
+    "high_20": "20-period high (prior candles). This is the breakout level — entry triggers when price crosses above it."
   },
 
   "bias_criteria": {
-    "bullish": ["Price is above VWAP", "Price is above EMA(8)"],
-    "bearish": ["Price is below VWAP", "Price is below EMA(8)"]
+    "bullish": [
+      "Price is above EMA(20)",
+      "EMA(20) is above EMA(50) — golden alignment"
+    ],
+    "bearish": [
+      "Price is below EMA(20)",
+      "EMA(20) is below EMA(50)"
+    ]
   },
 
   "entry_rules": {
     "long": [
-      "Price is above VWAP — buyers in control for the session",
-      "Price is above EMA(8) — uptrend confirmed",
-      "RSI(3) has dropped below 30 — short-term pullback in an uptrend, snap-back likely"
+      "Price is above EMA(20) and EMA(20) is above EMA(50) — bullish trend alignment confirmed",
+      "Price is above the 20-period high — breakout triggered",
+      "Volume is greater than 1.5x the 20-period average volume — institutional participation on breakout",
+      "Price is not more than 1x ATR above the 20-period high — not overextended (most important rule)"
     ],
     "short": [
-      "Price is below VWAP — sellers in control",
-      "Price is below EMA(8) — downtrend confirmed",
-      "RSI(3) has spiked above 70 — overbought in a downtrend, reversal likely"
+      "Price is below EMA(20) and EMA(20) is below EMA(50) — bearish trend alignment confirmed",
+      "Price is below the 20-period low — breakdown triggered",
+      "Volume is greater than 1.5x the 20-period average volume — institutional selling on breakdown",
+      "Price is not more than 1x ATR below the 20-period low — not overextended"
     ]
   },
 
   "exit_rules": [
-    "Exit when RSI(3) crosses back above 50 (for longs) or below 50 (for shorts)",
-    "Hard stop: 0.3% below entry for longs, 0.3% above entry for shorts",
-    "Take profit at next VWAP touch or EMA(8) cross"
+    "Stop loss: below EMA(20) or below the consolidation low (whichever is tighter)",
+    "Take partial profit (33-50%) at prior swing high or key resistance",
+    "Trail stop to breakeven after 1R is hit",
+    "Full exit if EMA(20) is lost on a closing basis"
   ],
 
   "risk_rules": [
-    "Risk maximum 1% of portfolio per trade",
+    "Risk maximum 1-2% of portfolio per trade",
     "Maximum trade size capped by MAX_TRADE_SIZE_USD in .env",
     "Maximum trades per day capped by MAX_TRADES_PER_DAY in .env",
-    "Do not trade if price is more than 1.5% away from VWAP — overextended",
+    "ATR filter is mandatory — do not enter if price is more than 1x ATR above the breakout level",
     "Paper trade first — validate this strategy on your specific asset before going live"
   ],
 
-  "notes": "Scalping strategy — designed for 1m to 5m timeframes. RSI(3) is intentionally fast and sensitive. Do not apply to higher timeframes."
+  "notes": "Swing strategy — designed for 4H to Daily timeframes. Best applied after a prior momentum move followed by a tight VCP consolidation. Do not apply to 1m or scalping timeframes. The ATR filter is the most important rule."
 }

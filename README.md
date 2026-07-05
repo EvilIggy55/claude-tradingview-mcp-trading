@@ -30,7 +30,7 @@ Here's what it does when you run it:
 |------|-----------------|
 | 1 | Reads your `rules.json` strategy |
 | 2 | Pulls live price + indicator data from TradingView |
-| 3 | Calculates MACD from raw candle data |
+| 3 | Calculates EMA(20), EMA(50), ATR(14), volume, and 20-period high/low from raw candle data |
 | 4 | Evaluates market bias (bullish / bearish / neutral) |
 | 4b | Checks trade limits — daily cap and max trade size |
 | 5 | Runs the safety check — every entry condition checked |
@@ -209,7 +209,7 @@ The bot runs one check and exits, so schedule it with the VPS's built-in cron. R
 
 ## Build Your Own Strategy (Optional)
 
-The example `rules.json` uses the van de Poppe + Tone Vays BTC strategy. To build one from any trader's public videos:
+The example `rules.json` uses the Qullamaggie Breakout strategy (Kristjan Kullamägi). To build one from any trader's public videos:
 
 1. Go to [Apify](https://apify.com?fpr=3ly3yd) and search the actor store for **YouTube Transcript Scraper** — takes about 30 seconds per channel
 2. Paste the output into `prompts/01-extract-strategy.md`
@@ -272,7 +272,7 @@ Every condition in your `entry_rules` must pass before a trade goes through. One
 Additional guardrails that apply regardless of strategy:
 - Maximum trade size capped at `MAX_TRADE_SIZE_USD` in `.env`
 - Maximum trades per day capped at `MAX_TRADES_PER_DAY` in `.env`
-- Position sizing calculated from your portfolio value — max 1% risk per trade
+- Position sizing calculated from your portfolio value — max 1-2% risk per trade
 - Every decision logged to `safety-check-log.json` with exact indicator values
 - Every executed trade recorded in `trades.csv` for accounting
 

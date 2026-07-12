@@ -1,12 +1,11 @@
 /**
  * Claude + TradingView MCP — Automated Trading Bot
  *
- * Cloud mode: runs on Railway on a schedule. Pulls candle data direct from
- * Binance (free, no auth), calculates all indicators, runs safety check,
- * executes via BitGet if everything lines up.
+ * Market data: Yahoo Finance (stocks), Binance (crypto, falls back to Kraken if geo-blocked)
+ * Exchange execution: Kraken REST API (HMAC-SHA512 auth)
  *
  * Local mode: run manually — node bot.js
- * Cloud mode: deploy to Railway, set env vars, Railway triggers on cron schedule
+ * Cloud mode: cron on VPS, runs on schedule
  */
 
 import "dotenv/config";
@@ -17,7 +16,7 @@ import { execSync } from "child_process";
 // ─── Onboarding ───────────────────────────────────────────────────────────────
 
 function checkOnboarding() {
-  const required = ["BITGET_API_KEY", "BITGET_SECRET_KEY", "BITGET_PASSPHRASE"];
+  const required = ["API_KEY", "PRIVATE_KEY"];
   const missing = required.filter((k) => !process.env[k]);
 
   if (!existsSync(".env")) {
@@ -27,10 +26,9 @@ function checkOnboarding() {
     writeFileSync(
       ".env",
       [
-        "# BitGet credentials",
-        "BITGET_API_KEY=",
-        "BITGET_SECRET_KEY=",
-        "BITGET_PASSPHRASE=",
+        "# Kraken credentials",
+        "API_KEY=",
+        "PRIVATE_KEY=",
         "",
         "# Trading config",
         "PORTFOLIO_VALUE_USD=1000",
@@ -45,7 +43,7 @@ function checkOnboarding() {
       execSync("open .env");
     } catch {}
     console.log(
-      "Fill in your BitGet credentials in .env then re-run: node bot.js\n",
+      "Fill in your Kraken credentials in .env then re-run: node bot.js\n",
     );
     process.exit(0);
   }
@@ -79,11 +77,10 @@ const CONFIG = {
   maxTradesPerDay: parseInt(process.env.MAX_TRADES_PER_DAY || "3"),
   paperTrading: process.env.PAPER_TRADING !== "false",
   tradeMode: process.env.TRADE_MODE || "spot",
-  bitget: {
-    apiKey: process.env.BITGET_API_KEY,
-    secretKey: process.env.BITGET_SECRET_KEY,
-    passphrase: process.env.BITGET_PASSPHRASE,
-    baseUrl: process.env.BITGET_BASE_URL || "https://api.bitget.com",
+  kraken: {
+    apiKey: process.env.API_KEY,
+    privateKey: process.env.PRIVATE_KEY,
+    baseUrl: "https://api.kraken.com",
   },
 };
 
@@ -107,36 +104,83 @@ function countTodaysTrades(log) {
   ).length;
 }
 
-// ─── Market Data (Binance public API — free, no auth) ───────────────────────
+// ─── Market Data ─────────────────────────────────────────────────────────────
+// Stocks → Yahoo Finance. Crypto → Binance (falls back to Kraken if geo-blocked)
 
-async function fetchCandles(symbol, interval, limit = 100) {
-  // Map our timeframe format to Binance interval format
-  const intervalMap = {
-    "1m": "1m",
-    "3m": "3m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1H": "1h",
-    "4H": "4h",
-    "1D": "1d",
-    "1W": "1w",
-  };
-  const binanceInterval = intervalMap[interval] || "1m";
+const isCrypto = (symbol) => /USDT$|BTC$|ETH$|BNB$/i.test(symbol);
 
-  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceInterval}&limit=${limit}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Binance API error: ${res.status}`);
+async function fetchCandlesYahoo(symbol, interval, limit = 500) {
+  const intervalMap = { "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m", "1H": "1h", "4H": "1h", "1D": "1d", "1W": "1wk" };
+  const yahooInterval = intervalMap[interval] || "1d";
+  const range = (yahooInterval === "1d" || yahooInterval === "1wk") ? "2y" : "60d";
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=${yahooInterval}&range=${range}`;
+  const res = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!res.ok) throw new Error(`Yahoo Finance API error: ${res.status}`);
   const data = await res.json();
+  if (data.chart.error) throw new Error(`Yahoo Finance: ${data.chart.error.description}`);
+  const result = data.chart.result[0];
+  const { open, high, low, close, volume } = result.indicators.quote[0];
+  return result.timestamp
+    .map((t, i) => ({ time: t * 1000, open: open[i], high: high[i], low: low[i], close: close[i], volume: volume[i] }))
+    .filter((c) => c.close !== null && c.open !== null)
+    .slice(-limit);
+}
 
-  return data.map((k) => ({
-    time: k[0],
+async function fetchCandlesKraken(symbol, interval, limit = 500) {
+  // Kraken interval in minutes
+  const intervalMap = { "1m": 1, "5m": 5, "15m": 15, "30m": 30, "1H": 60, "4H": 240, "1D": 1440, "1W": 10080 };
+  const minutes = intervalMap[interval] || 60;
+  // Kraken pair: BTCUSDT → XBTUSDT, ETHUSDT → ETHUSDT
+  const pair = symbol.replace(/^BTC/, "XBT");
+  const url = `https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=${minutes}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Kraken API error: ${res.status}`);
+  const data = await res.json();
+  if (data.error && data.error.length) throw new Error(`Kraken: ${data.error[0]}`);
+  const key = Object.keys(data.result).find((k) => k !== "last");
+  const rows = data.result[key];
+  // Kraken returns [time, open, high, low, close, vwap, volume, count]
+  return rows.slice(-limit).map((k) => ({
+    time: k[0] * 1000,
     open: parseFloat(k[1]),
     high: parseFloat(k[2]),
     low: parseFloat(k[3]),
     close: parseFloat(k[4]),
-    volume: parseFloat(k[5]),
+    volume: parseFloat(k[6]),
   }));
+}
+
+async function fetchCandles(symbol, interval, limit = 500) {
+  if (!isCrypto(symbol)) {
+    console.log("  Fetching from Yahoo Finance");
+    return fetchCandlesYahoo(symbol, interval, limit);
+  }
+  const intervalMap = { "1m": "1m", "3m": "3m", "5m": "5m", "15m": "15m", "30m": "30m", "1H": "1h", "4H": "4h", "1D": "1d", "1W": "1w" };
+  const binanceInterval = intervalMap[interval] || "1m";
+  const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${binanceInterval}&limit=${limit}`;
+  try {
+    const res = await fetch(url);
+    if (res.status === 451 || res.status === 403) {
+      console.log("  Binance geo-blocked — switching to Kraken public API");
+      return fetchCandlesKraken(symbol, interval, limit);
+    }
+    if (!res.ok) throw new Error(`Binance API error: ${res.status}`);
+    const data = await res.json();
+    return data.map((k) => ({
+      time: k[0],
+      open: parseFloat(k[1]),
+      high: parseFloat(k[2]),
+      low: parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume: parseFloat(k[5]),
+    }));
+  } catch (err) {
+    if (err.message.includes("fetch failed") || err.message.includes("Binance")) {
+      console.log("  Binance unreachable — switching to Kraken public API");
+      return fetchCandlesKraken(symbol, interval, limit);
+    }
+    throw err;
+  }
 }
 
 // ─── Indicator Calculations ──────────────────────────────────────────────────
@@ -294,56 +338,67 @@ function checkTradeLimits(log) {
   return true;
 }
 
-// ─── BitGet Execution ────────────────────────────────────────────────────────
+// ─── Kraken Execution ────────────────────────────────────────────────────────
 
-function signBitGet(timestamp, method, path, body = "") {
-  const message = `${timestamp}${method}${path}${body}`;
+function signKraken(path, postData, nonce) {
+  // Kraken signature: HMAC-SHA512(path + SHA256(nonce + postData), base64decode(privateKey))
+  const sha256 = crypto.createHash("sha256").update(nonce + postData).digest("binary");
   return crypto
-    .createHmac("sha256", CONFIG.bitget.secretKey)
-    .update(message)
+    .createHmac("sha512", Buffer.from(CONFIG.kraken.privateKey, "base64"))
+    .update(path + sha256, "binary")
     .digest("base64");
 }
 
-async function placeBitGetOrder(symbol, side, sizeUSD, price) {
-  const quantity = (sizeUSD / price).toFixed(6);
-  const timestamp = Date.now().toString();
-  const path =
-    CONFIG.tradeMode === "spot"
-      ? "/api/v2/spot/trade/placeOrder"
-      : "/api/v2/mix/order/placeOrder";
+async function placeKrakenOrder(symbol, side, sizeUSD, price) {
+  // Kraken pair: BTCUSDT → XBTUSDT
+  const pair = symbol.replace(/^BTC/, "XBT");
+  const volume = (sizeUSD / price).toFixed(8);
+  const nonce = Date.now().toString();
+  const path = "/0/private/AddOrder";
 
-  const body = JSON.stringify({
-    symbol,
-    side,
-    orderType: "market",
-    quantity,
-    ...(CONFIG.tradeMode === "futures" && {
-      productType: "USDT-FUTURES",
-      marginMode: "isolated",
-      marginCoin: "USDT",
-    }),
+  const params = new URLSearchParams({
+    nonce,
+    pair,
+    type: side,        // "buy" or "sell"
+    ordertype: "market",
+    volume,
   });
+  const postData = params.toString();
+  const signature = signKraken(path, postData, nonce);
 
-  const signature = signBitGet(timestamp, "POST", path, body);
-
-  const res = await fetch(`${CONFIG.bitget.baseUrl}${path}`, {
+  const res = await fetch(`${CONFIG.kraken.baseUrl}${path}`, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "ACCESS-KEY": CONFIG.bitget.apiKey,
-      "ACCESS-SIGN": signature,
-      "ACCESS-TIMESTAMP": timestamp,
-      "ACCESS-PASSPHRASE": CONFIG.bitget.passphrase,
+      "API-Key": CONFIG.kraken.apiKey,
+      "API-Sign": signature,
+      "Content-Type": "application/x-www-form-urlencoded",
     },
-    body,
+    body: postData,
   });
 
   const data = await res.json();
-  if (data.code !== "00000") {
-    throw new Error(`BitGet order failed: ${data.msg}`);
+  if (data.error && data.error.length > 0) {
+    throw new Error(`Kraken order failed: ${data.error.join(", ")}`);
   }
 
-  return data.data;
+  return { orderId: data.result.txid?.[0], description: data.result.descr?.order };
+}
+
+// ─── Telegram Notifications ──────────────────────────────────────────────────
+
+async function sendTelegram(message) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "HTML" }),
+    });
+  } catch (err) {
+    console.log(`Telegram notify failed: ${err.message}`);
+  }
 }
 
 // ─── Tax CSV Logging ─────────────────────────────────────────────────────────
@@ -421,7 +476,7 @@ function writeTradeCsv(logEntry) {
   const row = [
     date,
     time,
-    "BitGet",
+    "Kraken",
     logEntry.symbol,
     side,
     quantity,
@@ -497,7 +552,8 @@ async function run() {
   }
 
   // Fetch candle data — need enough for EMA(50) + ATR(14)
-  console.log("\n── Fetching market data from Binance ───────────────────\n");
+  const source = isCrypto(CONFIG.symbol) ? "Binance" : "Yahoo Finance";
+  console.log(`\n── Fetching market data from ${source} ───────────────────\n`);
   const candles = await fetchCandles(CONFIG.symbol, CONFIG.timeframe, 500);
   const closes = candles.map((c) => c.close);
   const price = closes[closes.length - 1];
@@ -560,6 +616,21 @@ async function run() {
     console.log(`🚫 TRADE BLOCKED`);
     console.log(`   Failed conditions:`);
     failed.forEach((f) => console.log(`   - ${f}`));
+
+    // Near-breakout alert: price cleared 20D high but only volume is missing
+    const bullishBias = price > ema20 && ema20 > ema50;
+    const priceAboveBreakout = price > high20;
+    const onlyVolumeMissing = bullishBias && priceAboveBreakout &&
+      failed.length === 1 && failed[0].includes("Volume");
+    if (onlyVolumeMissing) {
+      const volRatio = (volume / avgVolume).toFixed(2);
+      await sendTelegram(
+        `⚠️ <b>${CONFIG.symbol} breakout — waiting on volume</b>\n` +
+        `Price: $${price.toFixed(2)} (above 20D high $${high20.toFixed(2)})\n` +
+        `Volume: ${volRatio}x avg (need 1.5x)\n` +
+        `All other conditions met.`
+      );
+    }
   } else {
     console.log(`✅ ALL CONDITIONS MET`);
 
@@ -570,12 +641,18 @@ async function run() {
       console.log(`   (Set PAPER_TRADING=false in .env to place real orders)`);
       logEntry.orderPlaced = true;
       logEntry.orderId = `PAPER-${Date.now()}`;
+      await sendTelegram(
+        `📋 <b>PAPER BUY — ${CONFIG.symbol}</b>\n` +
+        `Price: $${price.toFixed(2)}\n` +
+        `Size: $${tradeSize.toFixed(2)}\n` +
+        `All conditions met ✅`
+      );
     } else {
       console.log(
         `\n🔴 PLACING LIVE ORDER — $${tradeSize.toFixed(2)} BUY ${CONFIG.symbol}`,
       );
       try {
-        const order = await placeBitGetOrder(
+        const order = await placeKrakenOrder(
           CONFIG.symbol,
           "buy",
           tradeSize,
@@ -583,10 +660,20 @@ async function run() {
         );
         logEntry.orderPlaced = true;
         logEntry.orderId = order.orderId;
-        console.log(`✅ ORDER PLACED — ${order.orderId}`);
+        console.log(`✅ ORDER PLACED — ${order.orderId} (${order.description})`);
+        await sendTelegram(
+          `🔴 <b>LIVE BUY — ${CONFIG.symbol}</b>\n` +
+          `Price: $${price.toFixed(2)}\n` +
+          `Size: $${tradeSize.toFixed(2)}\n` +
+          `Order: ${order.orderId}`
+        );
       } catch (err) {
         console.log(`❌ ORDER FAILED — ${err.message}`);
         logEntry.error = err.message;
+        await sendTelegram(
+          `❌ <b>ORDER FAILED — ${CONFIG.symbol}</b>\n` +
+          `${err.message}`
+        );
       }
     }
   }

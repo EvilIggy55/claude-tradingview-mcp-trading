@@ -1,61 +1,68 @@
 {
-  "watchlist": ["BTCUSDT"],
+  "watchlist": ["AAPL"],
   "default_timeframe": "4H",
 
   "strategy": {
     "name": "Qullamaggie Breakout",
-    "sources": ["Kristjan Kullamägi (@Qullamaggie)"],
-    "description": "Momentum move followed by tight consolidation above EMA(20)/EMA(50), then breakout above the 20-period high with volume expansion. The ATR filter is the most important rule — skip every overextended entry."
+    "sources": ["Kristjan Kullamägi (@Qullamaggie-fkdave) — Qullamaggie Swing Trading School"],
+    "description": "Strong prior momentum move, pullback to rising SMA10/20/50, higher lows, tight consolidation range, then breakout above the range on volume. SMA10 is the trailing stop. Market bias filter (SMA10 above SMA20, both rising) is required before any long entry."
   },
 
   "indicators": {
-    "ema_20": "Short-term trend. Price must be above this during consolidation. Acts as dynamic support.",
-    "ema_50": "Medium-term trend. EMA(20) must be above EMA(50) for bullish alignment.",
-    "atr_14": "Volatility measure. Used to check if price is overextended above the breakout level. Most important filter.",
-    "volume": "Breakout confirmation. Volume must expand significantly on the breakout bar (>1.5x 20-period average).",
-    "high_20": "20-period high (prior candles). This is the breakout level — entry triggers when price crosses above it."
+    "sma_10": "Short-term trend and primary trailing stop. Strongest stocks surf the SMA10. First 4H close below SMA10 = exit remaining position.",
+    "sma_20": "Medium-term support. Most setups consolidate surfing the SMA20. SMA10 must be above SMA20 for bullish bias.",
+    "sma_50": "Deeper pullback support. Valid for entries when price bounces cleanly off SMA50 after a big prior move.",
+    "atr_14": "Volatility. Stop distance (entry to consolidation low) must not exceed 1 ATR. Most important entry filter.",
+    "volume": "Breakout confirmation. Breakout candle volume should be above the 20-period average."
   },
 
   "bias_criteria": {
     "bullish": [
-      "Price is above EMA(20)",
-      "EMA(20) is above EMA(50) — golden alignment"
+      "SMA10 is above SMA20",
+      "SMA10 is rising (current value greater than value 3 bars ago)",
+      "SMA20 is rising (current value greater than value 3 bars ago)"
     ],
     "bearish": [
-      "Price is below EMA(20)",
-      "EMA(20) is below EMA(50)"
+      "SMA10 is below SMA20",
+      "SMA10 is declining",
+      "SMA20 is declining — avoid swing longs, high fail rate"
+    ],
+    "neutral": [
+      "SMA10 and SMA20 are flat or mixed — reduced edge, be more selective"
     ]
   },
 
   "entry_rules": {
     "long": [
-      "Price is above EMA(20) and EMA(20) is above EMA(50) — bullish trend alignment confirmed",
-      "Price is above the 20-period high — breakout triggered",
-      "Volume is greater than 1.5x the 20-period average volume — institutional participation on breakout",
-      "Price is not more than 1x ATR above the 20-period high — not overextended (most important rule)"
+      "Market bias is bullish — SMA10 above SMA20, both rising",
+      "Price made a significant prior move up (momentum phase — large directional run)",
+      "Price pulled back or consolidated sideways after the move (at least 5 candles of base-building)",
+      "Price found support on SMA10, SMA20, or SMA50 during consolidation — 'surfing' the moving average",
+      "Price is forming higher lows during the consolidation (each pullback stops higher than the last)",
+      "Consolidation range is tightening — recent candles are visibly smaller and narrower",
+      "Current candle breaks out above the multi-candle consolidation range high",
+      "Volume on breakout candle is at or above the 20-period average volume",
+      "Distance from entry price to consolidation range low does not exceed 1 ATR14 — stop is within range"
     ],
-    "short": [
-      "Price is below EMA(20) and EMA(20) is below EMA(50) — bearish trend alignment confirmed",
-      "Price is below the 20-period low — breakdown triggered",
-      "Volume is greater than 1.5x the 20-period average volume — institutional selling on breakdown",
-      "Price is not more than 1x ATR below the 20-period low — not overextended"
-    ]
+    "short": []
   },
 
   "exit_rules": [
-    "Stop loss: below EMA(20) or below the consolidation low (whichever is tighter)",
-    "Take partial profit (33-50%) at prior swing high or key resistance",
-    "Trail stop to breakeven after 1R is hit",
-    "Full exit if EMA(20) is lost on a closing basis"
+    "Initial stop: low of the entry candle (or consolidation range low, whichever is closer)",
+    "After 3-5 candles of profitable movement: sell 1/3 to 1/2 of position to lock in gains",
+    "After partial exit: move remaining stop to break-even",
+    "Trailing stop on remaining position: first 4H candle close below SMA10 = exit all remaining",
+    "If price closes back inside the consolidation range on the entry candle or next candle: exit immediately"
   ],
 
   "risk_rules": [
-    "Risk maximum 1-2% of portfolio per trade",
-    "Maximum trade size capped by MAX_TRADE_SIZE_USD in .env",
-    "Maximum trades per day capped by MAX_TRADES_PER_DAY in .env",
-    "ATR filter is mandatory — do not enter if price is more than 1x ATR above the breakout level",
-    "Paper trade first — validate this strategy on your specific asset before going live"
+    "Stop loss must not exceed 1 ATR14 from entry — if it does, skip the trade",
+    "Maximum single trade size capped by MAX_TRADE_SIZE_USD in .env (set to $100)",
+    "Maximum 3 trades per day — capped by MAX_TRADES_PER_DAY in .env",
+    "Do not trade longs when market bias is bearish (SMA10 below SMA20, both declining)",
+    "Win rate will be 25-35% — small frequent losses are expected and normal",
+    "Aim for 5x-20x initial risk on winners — let them run with SMA10 trailing stop"
   ],
 
-  "notes": "Swing strategy — designed for 4H to Daily timeframes. Best applied after a prior momentum move followed by a tight VCP consolidation. Do not apply to 1m or scalping timeframes. The ATR filter is the most important rule."
+  "notes": "Adapted from Qullamaggie's daily equity momentum strategy to 4H BTCUSDT. Core principle is identical: find a momentum move, wait for tight consolidation above rising MAs with higher lows, enter the range breakout. SMA10 is the key trailing stop tool — do not exit early if price holds it. Paper trade first."
 }

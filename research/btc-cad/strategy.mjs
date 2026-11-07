@@ -1,5 +1,6 @@
 export const MARKET = 'KRAKEN:BTCCAD';
 export const START_CAD = 25_000;
+export const RISK_PER_TRADE = 0.005;
 export const MIN = 60_000;
 const DAY = 1440 * MIN;
 const FEE = 0.0026;
@@ -110,7 +111,7 @@ export function estimateEntry(signal, quote, cashCad = START_CAD) {
   const reward = target * (1 - FEE) - debit;
   if (signal.stop <= 0 || entry <= signal.stop || entry - signal.stop > 2 * signal.atr ||
       entry - signal.reference > 0.25 * signal.atr || !(reward >= risk && risk > 0)) return null;
-  const btc = Math.floor(Math.min(0.0025 * cashCad / risk, 0.4 * cashCad / debit) * 1e8) / 1e8;
+  const btc = Math.floor(Math.min(RISK_PER_TRADE * cashCad / risk, 0.4 * cashCad / debit) * 1e8) / 1e8;
   if (!(btc > 0) || btc > quote.askBtc) return null;
   return { kind: 'offline_entry_estimate', quoteTime: quote.t, observedAsk: quote.ask,
     btc, entryCad: entry, feeCad: btc * entry * FEE, debitCad: btc * debit,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MIN, MARKET, pivots, sessionVwap, confirms, candidate, estimateEntry, foldCoverage } from './strategy.mjs';
+import { MIN, MARKET, RISK_PER_TRADE, pivots, sessionVwap, confirms, candidate, estimateEntry, foldCoverage } from './strategy.mjs';
 
 const bar = (i, close, low = close - 1, high = close + 1) =>
   ({ t: i * MIN, open: close - 0.25, close, low, high, volume: 1 });
@@ -76,7 +76,8 @@ test('estimate requires a later quote and depth; charges fees and adverse slippa
   assert.equal(estimate.observedAsk, q.ask);
   assert.ok(Math.abs(estimate.entryCad - 100.05) < 1e-10);
   assert.equal(estimate.feeCad, estimate.btc * estimate.entryCad * 0.0026);
-  assert.ok(estimate.estimatedStopRiskCad <= 62.5 && estimate.debitCad <= 10_000);
+  assert.equal(RISK_PER_TRADE, 0.005);
+  assert.ok(estimate.estimatedStopRiskCad <= 125 && estimate.debitCad <= 10_000);
   assert.equal(estimateEntry({ ...signal, target: 101 }, q), null);
 });
 

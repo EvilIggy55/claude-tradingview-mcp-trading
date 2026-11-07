@@ -1,8 +1,7 @@
 # BTC/CAD offline research proposal
 
-Apply from repository root with `git apply --check btc-cad-offline.patch`, then
-`git apply btc-cad-offline.patch` after approval. Run `npm run test:btc-cad`
-with Node 18 or later. The research path has no network calls, credentials,
+Run `npm run test:btc-cad` from the repository root with Node 18 or later.
+The research path has no network calls, credentials,
 broker adapter, orders or scheduler. The legacy start command is outside this
 research workflow.
 

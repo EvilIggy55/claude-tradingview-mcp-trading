@@ -141,15 +141,15 @@ export function estimateEntry(signal, quote, cashCad = START_CAD) {
 
 export function entryGate({
   now,
-  equityCad = START_CAD,
+  dayStartEquityCad = START_CAD,
   dayPnlCad = 0,
   lastExitAt = null,
 }) {
-  if (!Number.isSafeInteger(now) || !Number.isFinite(equityCad) || equityCad <= 0 ||
+  if (!Number.isSafeInteger(now) || !Number.isFinite(dayStartEquityCad) || dayStartEquityCad <= 0 ||
       !Number.isFinite(dayPnlCad) || (lastExitAt !== null && !Number.isSafeInteger(lastExitAt))) {
     throw Error('Invalid risk-gate state');
   }
-  if (dayPnlCad <= -equityCad * DAILY_LOSS_LIMIT) {
+  if (dayPnlCad <= -dayStartEquityCad * DAILY_LOSS_LIMIT) {
     return { allow: false, reason: 'daily_loss_limit' };
   }
   if (lastExitAt !== null && now - lastExitAt < COOLDOWN_MINUTES * MIN) {

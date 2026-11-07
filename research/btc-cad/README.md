@@ -23,30 +23,33 @@ of true ranges. Stop below the lower of the signal low and deep retracement
 boundary by 0.5 ATR, target the swing high. At entry reject a stop distance
 over 2 ATR and adverse extension over 0.25 ATR.
 
-Compare three independently selected modes: completed bullish body; close
-crossing above the latest previously confirmed strict 1/1 resistance; or
-three rising 1m closes with the common 15m trend gate. These are proposed
-operational definitions of the recovered alternatives.
+Use `volume_breakout` as the primary 1-minute trigger. It requires a bullish
+body of at least half the candle range, a close above the previous three
+1-minute highs, and volume above the preceding 20-candle median. The bullish
+body, strict resistance close-cross, and rising-close modes remain comparison
+variants. Do not select a variant from holdout results.
 
 Entry estimate requires a later same-venue bid/ask with sufficient displayed
 ask size within one minute. Spread is charged through the quote, with 5 bps
 additional adverse slippage and 26 bps fee per side as research assumptions.
 Exit values are scenario inputs for risk/reward arithmetic only. No OHLC price
-becomes a fill. Require estimated net target reward at least equal to
-estimated stop risk. Use CAD 25,000 initial cash, a CAD 125 initial risk
-budget (0.5% of cash), and a 40% debit cap including fees. This 0.5% setting
+becomes a fill. Require estimated net target reward of at least 1.5 times
+estimated stop risk. Emit a time-stop decision after 20 minutes when neither
+the stop nor target has triggered. Use CAD 25,000 initial cash, a CAD 125
+initial risk budget (0.5% of cash), and a 40% debit cap including fees. This 0.5% setting
 is the latest accepted per-trade risk for the 90-day training and 30-day
 holdout configuration. The earlier 0.25% setting is retired for this branch.
 The proposed spread ceiling is 10 bps. Venue fee tier, tick/lot rules,
 latency, quote provenance and exit depth need verification.
 
-Outstanding: daily five-entry cap and cooldown; breakout retest; halt after
-three losses and prevent loss-driven size increases; daily-loss and drawdown
-limits; journaling and portfolio state; exit quote matching with gap, stale
-quote, and ambiguous stop/target handling; authenticated offline export
-provenance and cross-timeframe validation. Daily controls need a defined
-session and cooldown. Spread and displayed ask size alone cannot establish
-actual execution quality.
+The entry gate stops new entries at a 1% realized daily loss and enforces a
+15-minute cooldown after an exit. These gates operate on supplied portfolio
+state and do not submit orders. Outstanding: daily five-entry cap; breakout
+retest; halt after three losses and prevent loss-driven size increases;
+drawdown limits; journaling and portfolio state; exit quote matching with gap,
+stale quote, and ambiguous stop/target handling; authenticated offline export
+provenance and cross-timeframe validation. Spread and displayed ask size alone
+cannot establish actual execution quality.
 
 The coverage function gates one UTC-aligned 90/30 fold on complete 1m and 5m
 bars. Before evaluating, verify aligned 15m coverage, indicator warmup,

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node bot.js",
-    "dev": "node bot.js"
+    "dev": "node bot.js",
+    "test:btc-cad": "node --test research/btc-cad/strategy.test.mjs"
   },
   "dependencies": {
     "dotenv": "^16.4.5",

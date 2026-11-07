@@ -1,6 +1,10 @@
 export const MARKET = 'KRAKEN:BTCCAD';
 export const START_CAD = 25_000;
 export const RISK_PER_TRADE = 0.005;
+export const MIN_REWARD_RISK = 1.5;
+export const MAX_HOLD_MINUTES = 20;
+export const DAILY_LOSS_LIMIT = 0.01;
+export const COOLDOWN_MINUTES = 15;
 export const MIN = 60_000;
 const DAY = 1440 * MIN;
 const FEE = 0.0026;
@@ -18,6 +22,13 @@ function completed(rows, minutes, asOf) {
         !Number.isFinite(b.volume) || b.volume < 0) throw Error('Invalid or noncontiguous bars');
   }
   return bars;
+}
+
+function median(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 export function pivots(rows, asOf) {
@@ -61,6 +72,15 @@ export function confirms(mode, bars) {
       return false;
     }
     case 'momentum': return c.close > b.close && b.close > a.close;
+    case 'volume_breakout': {
+      if (bars.length < 24) return false;
+      const prior = bars.slice(-4, -1);
+      const volumes = bars.slice(-21, -1).map(x => x.volume);
+      const localHigh = Math.max(...prior.map(x => x.high));
+      const range = c.high - c.low;
+      return range > 0 && c.close > localHigh && c.close > c.open &&
+        c.close - c.open >= 0.5 * range && c.volume > median(volumes);
+    }
     default: throw Error('Unknown confirmation');
   }
 }
@@ -110,12 +130,46 @@ export function estimateEntry(signal, quote, cashCad = START_CAD) {
   const risk = debit - stop * (1 - FEE);
   const reward = target * (1 - FEE) - debit;
   if (signal.stop <= 0 || entry <= signal.stop || entry - signal.stop > 2 * signal.atr ||
-      entry - signal.reference > 0.25 * signal.atr || !(reward >= risk && risk > 0)) return null;
+      entry - signal.reference > 0.25 * signal.atr ||
+      !(reward >= MIN_REWARD_RISK * risk && risk > 0)) return null;
   const btc = Math.floor(Math.min(RISK_PER_TRADE * cashCad / risk, 0.4 * cashCad / debit) * 1e8) / 1e8;
   if (!(btc > 0) || btc > quote.askBtc) return null;
   return { kind: 'offline_entry_estimate', quoteTime: quote.t, observedAsk: quote.ask,
     btc, entryCad: entry, feeCad: btc * entry * FEE, debitCad: btc * debit,
     estimatedStopRiskCad: btc * risk, estimatedTargetProfitCad: btc * reward };
+}
+
+export function entryGate({
+  now,
+  equityCad = START_CAD,
+  dayPnlCad = 0,
+  lastExitAt = null,
+}) {
+  if (!Number.isSafeInteger(now) || !Number.isFinite(equityCad) || equityCad <= 0 ||
+      !Number.isFinite(dayPnlCad) || (lastExitAt !== null && !Number.isSafeInteger(lastExitAt))) {
+    throw Error('Invalid risk-gate state');
+  }
+  if (dayPnlCad <= -equityCad * DAILY_LOSS_LIMIT) {
+    return { allow: false, reason: 'daily_loss_limit' };
+  }
+  if (lastExitAt !== null && now - lastExitAt < COOLDOWN_MINUTES * MIN) {
+    return { allow: false, reason: 'cooldown' };
+  }
+  return { allow: true, reason: null };
+}
+
+// This emits an exit decision only. A caller must supply a later executable quote for any fill.
+export function exitDecision({ entryAt, now, low, high, close, stop, target }) {
+  if (![entryAt, now, low, high, close, stop, target].every(Number.isFinite) ||
+      now < entryAt || low > high || close < low || close > high || stop <= 0 || target <= stop) {
+    throw Error('Invalid exit state');
+  }
+  if (low <= stop) return { reason: 'stop', triggerAt: now };
+  if (high >= target) return { reason: 'target', triggerAt: now };
+  if (now - entryAt >= MAX_HOLD_MINUTES * MIN) {
+    return { reason: 'time_stop', triggerAt: now };
+  }
+  return null;
 }
 
 // One fold. A partial interval or an internal hole invalidates the entire fold.

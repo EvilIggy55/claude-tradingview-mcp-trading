@@ -33,9 +33,10 @@ ask size within one minute. Spread is charged through the quote, with 5 bps
 additional adverse slippage and 26 bps fee per side as research assumptions.
 Exit values are scenario inputs for risk/reward arithmetic only. No OHLC price
 becomes a fill. Require estimated net target reward at least equal to
-estimated stop risk. Use CAD 25,000 initial cash, a CAD 62.50 initial risk
-budget (0.25% of cash) and a 40% debit cap including fees. Earlier notes also
-give 0.5%; resolve the discrepancy before freezing historical evaluation.
+estimated stop risk. Use CAD 25,000 initial cash, a CAD 125 initial risk
+budget (0.5% of cash), and a 40% debit cap including fees. This 0.5% setting
+is the latest accepted per-trade risk for the 90-day training and 30-day
+holdout configuration. The earlier 0.25% setting is retired for this branch.
 The proposed spread ceiling is 10 bps. Venue fee tier, tick/lot rules,
 latency, quote provenance and exit depth need verification.
 

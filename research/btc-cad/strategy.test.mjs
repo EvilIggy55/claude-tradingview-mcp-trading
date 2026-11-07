@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MIN, MARKET, RISK_PER_TRADE, pivots, sessionVwap, confirms, candidate, estimateEntry, foldCoverage } from './strategy.mjs';
+import {
+  MIN, MARKET, RISK_PER_TRADE, MIN_REWARD_RISK, MAX_HOLD_MINUTES,
+  DAILY_LOSS_LIMIT, COOLDOWN_MINUTES, pivots, sessionVwap, confirms,
+  candidate, estimateEntry, entryGate, exitDecision, foldCoverage,
+} from './strategy.mjs';
 
 const bar = (i, close, low = close - 1, high = close + 1) =>
   ({ t: i * MIN, open: close - 0.25, close, low, high, volume: 1 });
@@ -37,6 +41,16 @@ test('confirmation modes distinguish close, resistance break and rising closes',
   assert.equal(confirms('bullish_candle', rows), true);
   assert.equal(confirms('breakout', rows.slice(0, 3)), false);
   assert.equal(confirms('momentum', [bar(0, 100), bar(1, 101), bar(2, 102)]), true);
+});
+
+test('volume breakout requires a bullish body, local break, and above-median volume', () => {
+  const rows = Array.from({ length: 23 }, (_, i) => ({ ...bar(i, 100), volume: 10 }));
+  rows.push({ ...bar(23, 102, 99, 103), open: 99.5, volume: 11 });
+  assert.equal(confirms('volume_breakout', rows), true);
+  rows[23] = { ...rows[23], volume: 10 };
+  assert.equal(confirms('volume_breakout', rows), false);
+  rows[23] = { ...rows[23], volume: 11, close: 100.5, open: 100.25, high: 103 };
+  assert.equal(confirms('volume_breakout', rows), false);
 });
 
 function fixture() {
@@ -77,8 +91,34 @@ test('estimate requires a later quote and depth; charges fees and adverse slippa
   assert.ok(Math.abs(estimate.entryCad - 100.05) < 1e-10);
   assert.equal(estimate.feeCad, estimate.btc * estimate.entryCad * 0.0026);
   assert.equal(RISK_PER_TRADE, 0.005);
+  assert.equal(MIN_REWARD_RISK, 1.5);
   assert.ok(estimate.estimatedStopRiskCad <= 125 && estimate.debitCad <= 10_000);
-  assert.equal(estimateEntry({ ...signal, target: 101 }, q), null);
+  assert.equal(estimateEntry({ ...signal, target: 103 }, q), null);
+});
+
+test('daily loss stop and cooldown gate block entries at exact thresholds', () => {
+  const now = 30 * MIN;
+  assert.deepEqual(entryGate({ now, dayPnlCad: -25_000 * DAILY_LOSS_LIMIT }), {
+    allow: false, reason: 'daily_loss_limit',
+  });
+  assert.deepEqual(entryGate({ now, dayPnlCad: -249.99 }), { allow: true, reason: null });
+  assert.deepEqual(entryGate({ now, lastExitAt: now - COOLDOWN_MINUTES * MIN + 1 }), {
+    allow: false, reason: 'cooldown',
+  });
+  assert.deepEqual(entryGate({ now, lastExitAt: now - COOLDOWN_MINUTES * MIN }), {
+    allow: true, reason: null,
+  });
+});
+
+test('time stop emits a decision after 20 minutes and never fabricates a fill', () => {
+  const state = { entryAt: MIN, low: 100, high: 101, close: 100.5, stop: 99, target: 103 };
+  assert.equal(exitDecision({ ...state, now: MIN + (MAX_HOLD_MINUTES - 1) * MIN }), null);
+  assert.deepEqual(exitDecision({ ...state, now: MIN + MAX_HOLD_MINUTES * MIN }), {
+    reason: 'time_stop', triggerAt: MIN + MAX_HOLD_MINUTES * MIN,
+  });
+  assert.deepEqual(exitDecision({ ...state, now: MIN + MAX_HOLD_MINUTES * MIN, low: 98 }), {
+    reason: 'stop', triggerAt: MIN + MAX_HOLD_MINUTES * MIN,
+  });
 });
 
 test('short or future coverage cannot qualify as a 90/30 fold', () => {

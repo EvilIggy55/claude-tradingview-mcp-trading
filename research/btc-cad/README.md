@@ -42,9 +42,9 @@ holdout configuration. The earlier 0.25% setting is retired for this branch.
 The proposed spread ceiling is 10 bps. Venue fee tier, tick/lot rules,
 latency, quote provenance and exit depth need verification.
 
-The entry gate stops new entries at a 1% realized daily loss and enforces a
-15-minute cooldown after an exit. These gates operate on supplied portfolio
-state and do not submit orders. Outstanding: daily five-entry cap; breakout
+The entry gate stops new entries at a 1% realized daily loss measured from the
+start-of-day equity and enforces a 15-minute cooldown after an exit. These
+gates operate on supplied portfolio state and do not submit orders. Outstanding: daily five-entry cap; breakout
 retest; halt after three losses and prevent loss-driven size increases;
 drawdown limits; journaling and portfolio state; exit quote matching with gap,
 stale quote, and ambiguous stop/target handling; authenticated offline export
